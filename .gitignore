@@ -1,0 +1,9 @@
+# outputs, caches, vendored clone
+outputs/
+**/vlm_cache/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+third_party_AgEval/
+*.tar.gz
+.DS_Store

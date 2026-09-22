@@ -1,0 +1,75 @@
+# =====================================================================
+# Leveraging Contrasting Visual References for Knowledge-Guided
+# Few-Shot Crop Disease Diagnosis  —  Soybean prototype
+# Configuration-driven paths. NO hard-coded credentials or tokens.
+# =====================================================================
+
+# ---- User-supplied inputs (protocol §2) ----
+sage_curated_dataset_dir: /work/mech-ai-scratch/tirtho/CyAg/Curated_Dataset   # SAGE_CURATED_DATASET_DIR
+sage_curated_images_subdir: Images/Soybean                                     # soybean image root under the curated dir
+
+# Source-grounded SAGE visual knowledge base (frozen; never generated from the query).
+kb_visual_descriptions_xlsx: /work/mech-ai-scratch/tirtho/SAGE_WACV_KB_visual_descriptions.xlsx
+kb_sourced_provenance_xlsx:  /work/mech-ai-scratch/tirtho/SAGE_MERGED_visual_KB.xlsx
+
+# Look-alike / contrasting reference data.
+hf_lookalike_dataset_id: tirtho149/plantseg-lookalike     # HF_LOOKALIKE_DATASET_ID (published)
+hf_revision: null                                         # HF_REVISION (pin before final run)
+lookalike_local_jsonl: /work/mech-ai-scratch/tirtho/GeoPlantPath/geophyto_qa_soybean_lookalike.jsonl
+lookalike_verification_csv: /work/mech-ai-scratch/tirtho/crop_sweep/plantseg_lookalike/lookalike_verification.csv
+
+experiment_output_dir: /work/mech-ai-scratch/tirtho/SoybeanContrastKB/outputs   # EXPERIMENT_OUTPUT_DIR
+
+# ---- Model / backend (protocol §2) ----
+# Frozen VLM served through the Claude Code headless CLI (`claude -p`), which
+# reads query/reference images via the Read tool. No API key stored in repo.
+model:
+  backend: claude_headless          # claude_headless | anthropic_api | vllm
+  model_id: claude-code-cli         # resolved by the CLI; recorded in run_manifest
+  cli_bin: claude
+  allowed_tools: Read
+  max_long_edge: 1024               # image resolution cap (fixed across all conditions)
+  temperature: 0.0                  # deterministic decoding for the primary run
+  seed_policy: deterministic
+  timeout_s: 300
+  max_retries: 3
+
+# ---- Experiment design (protocol §3-§4) ----
+crop: Soybean
+queries_per_class: 5
+shot_budgets: [0, 2, 4, 8]          # B = TOTAL reference images in the prompt (never per-class)
+candidate_k: 5                      # locked after the top-k recall study on validation data
+recall_target: 0.95
+min_images_per_eligible_class: 12   # need >=5 query + support headroom, group-aware
+seed: 42
+bootstrap_replicates: 10000
+alpha: 0.05
+noninferiority_margin_pp: -5.0      # predeclared; used only for K0-vs-G8 / KC4-vs-G8
+
+# Confirmatory test family (Holm-corrected). Primary = KC8 vs KG8.
+primary_comparison: [KC8, KG8]
+confirmatory_secondary:
+  - [KC8, G8]
+  - [K0, Z0]
+  - [KC4, G8]
+  - [KC8, KS8]
+
+# Condition registry (protocol §3). kb: two-stage KB pass; policy: reference selection.
+conditions:
+  Z0:   {kb: false, shots: 0, policy: none}
+  K0:   {kb: true,  shots: 0, policy: none}
+  G2:   {kb: false, shots: 2, policy: general}
+  G4:   {kb: false, shots: 4, policy: general}
+  G8:   {kb: false, shots: 8, policy: general}
+  KG2:  {kb: true,  shots: 2, policy: general}
+  KG4:  {kb: true,  shots: 4, policy: general}
+  KG8:  {kb: true,  shots: 8, policy: general}
+  KS2:  {kb: true,  shots: 2, policy: similarity}
+  KS4:  {kb: true,  shots: 4, policy: similarity}
+  KS8:  {kb: true,  shots: 8, policy: similarity}
+  KC2:  {kb: true,  shots: 2, policy: contrasting}
+  KC4:  {kb: true,  shots: 4, policy: contrasting}
+  KC8:  {kb: true,  shots: 8, policy: contrasting}
+  KCF2: {kb: true,  shots: 2, policy: counterfactual}
+  KCF4: {kb: true,  shots: 4, policy: counterfactual}
+  KCF8: {kb: true,  shots: 8, policy: counterfactual}
