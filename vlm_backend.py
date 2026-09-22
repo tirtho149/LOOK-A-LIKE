@@ -15,6 +15,7 @@ from __future__ import annotations
 import os, re, json, time, hashlib, subprocess, tempfile
 from pathlib import Path
 from typing import Optional
+from PIL import Image
 
 # Reuse AgEval's JSON extraction convention verbatim (first {...} block).
 def extract_json(s: str):
@@ -43,18 +44,44 @@ class VLMBackend:
         self.model_id = m.get("model_id", "claude-code-cli")
         self.cache_dir = Path(cache_dir or (Path(cfg["experiment_output_dir"]) / "vlm_cache"))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.max_long_edge = int(m.get("max_long_edge", 1024))
+        # De-identified staging dir: images are copied here under label-free,
+        # content-hashed names so the class NEVER leaks through the file path.
+        self.stage_dir = self.cache_dir / "staged"
+        self.stage_dir.mkdir(parents=True, exist_ok=True)
         self.calls = 0
 
+    # ---- de-identified image staging (prevents path-based label leakage) --
+    def _stage(self, src) -> str:
+        """Copy `src` to staged/<sha16>.jpg (neutral name), resolution-normalized.
+        The returned path carries NO class/label information."""
+        try:
+            with open(src, "rb") as fh:
+                sha = hashlib.sha256(fh.read()).hexdigest()[:16]
+        except OSError:
+            return str(src)
+        dst = self.stage_dir / f"img_{sha}.jpg"
+        if not dst.exists():
+            try:
+                im = Image.open(src).convert("RGB")
+                im.thumbnail((self.max_long_edge, self.max_long_edge))
+                tmp = dst.with_suffix(".tmp.jpg")
+                im.save(tmp, format="JPEG", quality=90); tmp.replace(dst)
+            except Exception:
+                return str(src)
+        return str(dst)
+
     # ---- prompt assembly -------------------------------------------------
-    @staticmethod
-    def _image_block(image_specs) -> str:
-        """image_specs: list of (path, caption). Renders an ordered Read list."""
+    def _image_block(self, image_specs) -> str:
+        """image_specs: list of (path, caption). Renders an ordered Read list
+        over DE-IDENTIFIED staged paths (captions still carry any intended
+        reference labels; the query caption is neutral)."""
         if not image_specs:
             return ""
         lines = ["\nYou are given the following image(s). Read each one with the Read tool "
                  "in the order listed, then reason over them:"]
         for i, (p, cap) in enumerate(image_specs, 1):
-            lines.append(f"  [{i}] {cap}: {p}")
+            lines.append(f"  [{i}] {cap}: {self._stage(p)}")
         return "\n".join(lines) + "\n"
 
     def _key(self, prompt: str, image_specs) -> str:
